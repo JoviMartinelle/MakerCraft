@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "powered=false": {
+      "model": "makercraft:block/arduino_output"
+    },
+    "powered=true": {
+      "model": "makercraft:block/arduino_output"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "makercraft:block/arduino_block"
+    }
+  }
+}
