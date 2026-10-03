@@ -1,4 +1,5 @@
 package upx6.makercraft;
+//MakerCraft 7.0 03/10/2026
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -44,7 +45,6 @@ public class MakerCraft implements ModInitializer {
     public static volatile String lastSerialMessage = null;
 
     private static boolean savedDataTested = false;
-
 
     @Override
     public void onInitialize() {
