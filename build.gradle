@@ -22,13 +22,18 @@ dependencies {
 		// Suporte ao Fabric Loader e Fabric API
 		modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 		modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-		implementation "com.fazecast:jSerialComm:2.11.2"
+		include implementation("com.fazecast:jSerialComm:2.11.2")
 	}
 }
 
 processResources {
 	def version = project.version
 	inputs.property "version", version
+	inputs.dir "arduino"
+
+	from("arduino/ComputadorMakerCraft") {
+		into "assets/makercraft/firmware/ComputadorMakerCraft"
+	}
 
 	filesMatching("fabric.mod.json") {
 		expand "version": version

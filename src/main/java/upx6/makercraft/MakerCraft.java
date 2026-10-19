@@ -2,14 +2,19 @@ package upx6.makercraft;
 //MakerCraft 7.0 03/10/2026
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 
 import net.minecraft.resources.Identifier;
 
+import upx6.makercraft.block.ModBlockEntities;
 import upx6.makercraft.block.ModBlocks;
 import upx6.makercraft.item.ModItems;
+import upx6.makercraft.network.ModNetworking;
+import upx6.makercraft.network.OpenOutputNumberPayload;
 import upx6.makercraft.serial.SerialManager;
 
 import org.slf4j.Logger;
@@ -17,6 +22,8 @@ import org.slf4j.LoggerFactory;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import upx6.makercraft.serial.FirmwareInstaller;
 
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -28,7 +35,9 @@ import net.minecraft.core.BlockPos;
 import upx6.makercraft.data.ArduinoOutputData;
 import upx6.makercraft.data.ModSavedData;
 
+import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionHand;
@@ -42,7 +51,14 @@ public class MakerCraft implements ModInitializer {
     public static final Logger LOGGER =
             LoggerFactory.getLogger(MOD_ID);
 
-    public static volatile String lastSerialMessage = null;
+    private static final Queue<String> incomingMessages =
+            new ConcurrentLinkedQueue<>();
+
+    private static String lastQueuedMessage;
+
+    private static volatile MinecraftServer currentServer;
+
+    private static volatile String startupNotice;
 
     private static boolean savedDataTested = false;
 
@@ -51,7 +67,11 @@ public class MakerCraft implements ModInitializer {
 
         ModBlocks.initialize();
 
+        ModBlockEntities.initialize();
+
         ModItems.initialize();
+
+        ModNetworking.register();
 
 
         // ======================================================
@@ -84,9 +104,31 @@ public class MakerCraft implements ModInitializer {
                     // - colocar outros blocos
                     // ==================================================
 
+                    BlockPos pos =
+                            hitResult.getBlockPos();
+
+                    BlockState state =
+                            level.getBlockState(pos);
+
+                    boolean handsFree =
+                            player.getMainHandItem().isEmpty()
+                                    && player.getOffhandItem().isEmpty();
+
                     if (player.isShiftKeyDown()) {
 
-                        return InteractionResult.PASS;
+                        if (!(state.getBlock() instanceof ArduinoOutputBlock) || !handsFree) {
+                            return InteractionResult.PASS;
+                        }
+
+                        if (level.isClientSide()) {
+                            return InteractionResult.SUCCESS;
+                        }
+
+                        return openOutputNumberEditor(
+                                (ServerPlayer) player,
+                                (ServerLevel) level,
+                                pos
+                        );
                     }
 
 
@@ -98,22 +140,6 @@ public class MakerCraft implements ModInitializer {
 
                         return InteractionResult.SUCCESS;
                     }
-
-
-                    // ==================================================
-                    // POSIÇÃO DO BLOCO CLICADO
-                    // ==================================================
-
-                    BlockPos pos =
-                            hitResult.getBlockPos();
-
-
-                    // ==================================================
-                    // ESTADO DO BLOCO
-                    // ==================================================
-
-                    BlockState state =
-                            level.getBlockState(pos);
 
 
                     // ==================================================
@@ -221,95 +247,104 @@ public class MakerCraft implements ModInitializer {
 
 
         // ======================================================
-        // CONEXÃO COM ARDUINO
-        // ======================================================
-
-        boolean connected = false;
-
-
-        for (var port :
-                SerialManager.getAvailablePorts()) {
-
-            String portName =
-                    port.getSystemPortName();
-
-
-            LOGGER.info(
-                    "Tentando conectar na porta {}...",
-                    portName
-            );
-
-
-            if (SerialManager.connect(portName)) {
-
-                LOGGER.info(
-                        "Arduino conectado na porta {}.",
-                        portName
-                );
-
-
-                connected = true;
-
-
-                try {
-
-                    Thread.sleep(2000);
-
-                } catch (InterruptedException e) {
-
-                    Thread.currentThread()
-                            .interrupt();
-                }
-
-
-                SerialManager.sendTestMessage(
-                        "HELLO_ARDUINO"
-                );
-
-
-                break;
-            }
-        }
-
-
-        if (!connected) {
-
-            LOGGER.error(
-                    "Não foi possível conectar a nenhuma porta serial."
-            );
-        }
-
-
-        // ======================================================
         // THREAD DO ARDUINO
+        //
+        // A conexão fica fora da thread de renderização.
+        // writeBytes na COM1 (porta da placa-mãe) bloqueia
+        // para sempre e o jogo nunca termina de iniciar.
         // ======================================================
+
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> currentServer = server);
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> currentServer = null);
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            String notice = startupNotice;
+            if (notice != null) {
+                handler.getPlayer().displayClientMessage(Component.literal(notice), false);
+            }
+        });
 
         Thread serialReader =
                 new Thread(() -> {
 
-                    while (true) {
+                    String portName = null;
+
+
+                    for (var port :
+                            SerialManager.getAvailablePorts()) {
+
+                        if (!SerialManager.looksLikeArduino(port)) {
+                            continue;
+                        }
+
+
+                        portName = port.getSystemPortName();
+                        break;
+                    }
+
+
+                    if (portName == null) {
+
+                        LOGGER.error(
+                                "Nenhum Arduino encontrado. Portas como COM1 (Communications Port) são ignoradas."
+                        );
+                    } else {
+
+                        LOGGER.info(
+                                "Tentando conectar na porta {}...",
+                                portName
+                        );
+
+
+                        try {
+
+                            prepareArduino(portName);
+
+                        } catch (InterruptedException e) {
+
+                            Thread.currentThread()
+                                    .interrupt();
+
+                            return;
+                        }
+                    }
+
+
+                    while (!Thread.currentThread().isInterrupted()) {
+
+                        SerialManager.drainOutgoing();
 
                         String message =
                                 SerialManager.readMessage();
 
 
-                        if (message != null
-                                && !message.isEmpty()) {
+                        int drained = 0;
 
-                            LOGGER.info(
-                                    "Arduino enviou: {}",
-                                    message
-                            );
+                        while (message != null
+                                && !message.isEmpty()
+                                && drained < 64) {
 
+                            if (!message.equals(lastQueuedMessage)) {
+                                LOGGER.info(
+                                        "Arduino enviou: {}",
+                                        message
+                                );
 
-                            lastSerialMessage =
-                                    message;
+                                while (incomingMessages.size() >= 32) {
+                                    incomingMessages.poll();
+                                }
+
+                                incomingMessages.add(message);
+                                lastQueuedMessage = message;
+                            }
+
+                            drained++;
+                            message = SerialManager.readMessage();
                         }
 
 
                         try {
 
-                            Thread.sleep(20);
+                            Thread.sleep(drained == 0 ? 20 : 1);
 
                         } catch (InterruptedException e) {
 
@@ -337,15 +372,12 @@ public class MakerCraft implements ModInitializer {
                 server -> {
 
                     String message =
-                            lastSerialMessage;
+                            incomingMessages.poll();
 
 
                     if (message == null) {
                         return;
                     }
-
-
-                    lastSerialMessage = null;
 
 
                     LOGGER.info(
@@ -873,6 +905,100 @@ public class MakerCraft implements ModInitializer {
     // ==========================================================
     // ID DO MOD
     // ==========================================================
+
+    private void prepareArduino(String portName) throws InterruptedException {
+        if (handshake(portName)) {
+            LOGGER.info("Arduino pronto na porta {}.", portName);
+            return;
+        }
+
+        SerialManager.disconnect();
+        Thread.sleep(500);
+        announce("Primeira vez com este Arduino: gravando o programa da placa. Pode levar alguns minutos.");
+
+        if (!FirmwareInstaller.install(portName)) {
+            announce("Não consegui gravar o Arduino. Confira o cabo e se a placa apareceu no computador.");
+            return;
+        }
+
+        Thread.sleep(500);
+        if (handshake(portName)) {
+            announce("Arduino gravado. O computador do jogo já pode enviar os comandos.");
+            return;
+        }
+
+        SerialManager.disconnect();
+        announce("A placa foi gravada, mas não respondeu. Feche o monitor serial se ele estiver aberto.");
+    }
+
+    private boolean handshake(String portName) throws InterruptedException {
+        if (!SerialManager.connect(portName)) {
+            return false;
+        }
+
+        Thread.sleep(2000);
+        SerialManager.sendTestMessage("HELLO_ARDUINO");
+        long deadline = System.currentTimeMillis() + 3000;
+
+        while (System.currentTimeMillis() < deadline) {
+            String message = SerialManager.readMessage();
+            if (FirmwareInstaller.READY.equals(message)) {
+                return true;
+            }
+            Thread.sleep(40);
+        }
+
+        SerialManager.disconnect();
+        return false;
+    }
+
+    private static void announce(String message) {
+        startupNotice = message;
+        LOGGER.info(message);
+        MinecraftServer server = currentServer;
+        if (server == null) {
+            return;
+        }
+
+        server.execute(() -> {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.displayClientMessage(Component.literal(message), false);
+            }
+        });
+    }
+
+    private InteractionResult openOutputNumberEditor(
+            ServerPlayer player,
+            ServerLevel level,
+            BlockPos pos
+    ) {
+
+        ArduinoOutputData data =
+                ModSavedData.get(level);
+
+        ArduinoOutputData.OutputEntry output =
+                data.findOutputAt(
+                        pos.getX(),
+                        pos.getY(),
+                        pos.getZ(),
+                        level.dimension().toString()
+                );
+
+        if (output == null) {
+            player.displayClientMessage(
+                    Component.literal("Saída Arduino não registrada."),
+                    false
+            );
+            return InteractionResult.SUCCESS;
+        }
+
+        ModNetworking.send(
+                player,
+                new OpenOutputNumberPayload(pos, output.getNumber())
+        );
+        return InteractionResult.SUCCESS;
+    }
+
 
     public static Identifier id(
             String path

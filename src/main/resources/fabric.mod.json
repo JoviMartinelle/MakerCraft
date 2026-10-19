@@ -3,7 +3,7 @@
 	"id": "makercraft",
 	"version": "${version}",
 	"name": "MakerCraft",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Liga o Arduino aos computadores do mapa. Na primeira vez, o próprio jogo grava a placa.",
 	"authors": [
 		"Me!"
 	],
@@ -17,6 +17,9 @@
 	"entrypoints": {
 		"main": [
 			"upx6.makercraft.MakerCraft"
+		],
+		"client": [
+			"upx6.makercraft.client.MakerCraftClient"
 		]
 	},
 	"mixins": [

@@ -1,6 +1,9 @@
 {
   "variants": {
-    "": {
+    "powered=false": {
+      "model": "makercraft:block/arduino_block"
+    },
+    "powered=true": {
       "model": "makercraft:block/arduino_block"
     }
   }

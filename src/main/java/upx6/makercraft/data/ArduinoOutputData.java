@@ -432,6 +432,58 @@ public class ArduinoOutputData extends SavedData {
     }
 
 
+    public String setOutputNumber(
+            int x,
+            int y,
+            int z,
+            String dimension,
+            int number
+    ) {
+
+        if (number < 1 || number > 64) {
+            return "Use um número de 1 a 64.";
+        }
+
+        for (int i = 0; i < outputs.size(); i++) {
+            OutputEntry output = outputs.get(i);
+
+            if (output.getX() != x
+                    || output.getY() != y
+                    || output.getZ() != z
+                    || !output.getDimension().equals(dimension)) {
+                continue;
+            }
+
+            if (output.getNumber() == number) {
+                return null;
+            }
+
+            OutputEntry other = findOutputByNumber(number);
+            if (other != null) {
+                return "O número " + number
+                        + " já está em outra saída, em "
+                        + other.getX() + " " + other.getY() + " " + other.getZ() + ".";
+            }
+
+            outputs.set(
+                    i,
+                    new OutputEntry(
+                            output.getId(),
+                            number,
+                            output.getX(),
+                            output.getY(),
+                            output.getZ(),
+                            output.getDimension()
+                    )
+            );
+            setDirty();
+            return null;
+        }
+
+        return "Saída Arduino não registrada.";
+    }
+
+
     // ==========================================================
     // PROCURA OUTPUT PELA POSIÇÃO
     // ==========================================================

@@ -1,10 +1,12 @@
 package upx6.makercraft.item;
 
+import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import upx6.makercraft.MakerCraft;
 import upx6.makercraft.block.ModBlocks;
@@ -20,6 +22,12 @@ public class ModItems {
     public static final Item ARDUINO_OUTPUT = register(
             "arduino_output",
             properties -> new BlockItem(ModBlocks.ARDUINO_OUTPUT_BLOCK, properties),
+            new Item.Properties()
+    );
+
+    public static final Item COMPUTER = register(
+            "computer",
+            properties -> new BlockItem(ModBlocks.COMPUTER, properties),
             new Item.Properties()
     );
 
@@ -42,5 +50,11 @@ public class ModItems {
 
     public static void initialize() {
         MakerCraft.LOGGER.info("Registrando itens do MakerCraft");
+
+        ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.REDSTONE_BLOCKS).register(entries -> {
+            entries.accept(ARDUINO_BLOCK);
+            entries.accept(ARDUINO_OUTPUT);
+            entries.accept(COMPUTER);
+        });
     }
 }

@@ -4,7 +4,7 @@
       "model": "makercraft:block/arduino_output"
     },
     "powered=true": {
-      "model": "makercraft:block/arduino_output"
+      "model": "makercraft:block/arduino_output_on"
     }
   }
 }

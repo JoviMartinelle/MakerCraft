@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "makercraft:block/computer_side",
+    "down": "makercraft:block/computer_side",
+    "up": "makercraft:block/computer_top",
+    "north": "makercraft:block/computer_front",
+    "south": "makercraft:block/computer_side",
+    "east": "makercraft:block/computer_side",
+    "west": "makercraft:block/computer_side"
+  }
+}

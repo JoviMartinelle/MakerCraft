@@ -38,3 +38,12 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# OS
+
+Thumbs.db
+
+# Python
+
+__pycache__/
+*.py[cod]

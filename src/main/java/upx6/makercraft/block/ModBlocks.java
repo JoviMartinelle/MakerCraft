@@ -23,6 +23,12 @@ public class ModBlocks {
             BlockBehaviour.Properties.of()
     );
 
+    public static final Block COMPUTER = register(
+            "computer",
+            ComputerBlock::new,
+            BlockBehaviour.Properties.of().strength(1.5f)
+    );
+
     private static Block register(
             String name,
             java.util.function.Function<BlockBehaviour.Properties, Block> factory,

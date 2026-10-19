@@ -3,6 +3,9 @@ package upx6.makercraft.serial;
 import com.fazecast.jSerialComm.SerialPort;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class SerialManager {
 
@@ -12,29 +15,49 @@ public class SerialManager {
     private static final StringBuilder receiveBuffer =
             new StringBuilder();
 
+    private static final Queue<String> outgoing =
+            new ConcurrentLinkedQueue<>();
+
     public static SerialPort[] getAvailablePorts() {
         return SerialPort.getCommPorts();
     }
 
+    /**
+     * COM1 ("Communications Port") abre no Windows mesmo sem nada ligado,
+     * e o writeBytes nativo trava para sempre. Só aceitamos adaptadores USB.
+     */
+    public static boolean looksLikeArduino(SerialPort port) {
+        String description = port.getDescriptivePortName()
+                .toLowerCase(Locale.ROOT);
+
+        return description.contains("ch340")
+                || description.contains("ch341")
+                || description.contains("arduino")
+                || description.contains("usb-serial")
+                || description.contains("usb serial")
+                || description.contains("cp210")
+                || description.contains("ftdi")
+                || description.contains("wch");
+    }
+
     public static boolean connect(String portName) {
 
-        connectedPort =
-                SerialPort.getCommPort(portName);
+        SerialPort port = SerialPort.getCommPort(portName);
 
-        connectedPort.setBaudRate(9600);
-
-        connectedPort.setComPortTimeouts(
-                SerialPort.TIMEOUT_NONBLOCKING,
-                0,
-                0
+        port.setBaudRate(9600);
+        port.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
+        port.setComPortTimeouts(
+                SerialPort.TIMEOUT_READ_SEMI_BLOCKING
+                        | SerialPort.TIMEOUT_WRITE_BLOCKING,
+                50,
+                300
         );
 
-        if (!connectedPort.openPort()) {
-
-            connectedPort = null;
-
+        if (!port.openPort()) {
             return false;
         }
+
+        connectedPort = port;
 
         // Limpa qualquer lixo que tenha ficado de uma conexão anterior
         synchronized (receiveBuffer) {
@@ -44,22 +67,54 @@ public class SerialManager {
         return true;
     }
 
+    public static void disconnect() {
+        SerialPort port = connectedPort;
+        connectedPort = null;
+        outgoing.clear();
+        synchronized (receiveBuffer) {
+            receiveBuffer.setLength(0);
+        }
+        if (port != null && port.isOpen()) {
+            port.closePort();
+        }
+    }
+
+    public static boolean isConnected() {
+        SerialPort port = connectedPort;
+        return port != null && port.isOpen();
+    }
+
+    public static void queueMessage(String message) {
+        if (message != null && !message.isEmpty()) {
+            outgoing.add(message);
+        }
+    }
+
+    public static void drainOutgoing() {
+        String message;
+        while ((message = outgoing.poll()) != null) {
+            sendRaw(message);
+        }
+    }
+
     public static void sendTestMessage(String message) {
+        sendRaw(message + "\n");
+    }
 
-        if (connectedPort == null
-                || !connectedPort.isOpen()) {
+    private static void sendRaw(String message) {
+        SerialPort port = connectedPort;
 
+        if (port == null || !port.isOpen() || message == null || message.isEmpty()) {
             return;
         }
 
-        byte[] data =
-                (message + "\n")
-                        .getBytes(StandardCharsets.UTF_8);
+        byte[] data = message.getBytes(StandardCharsets.UTF_8);
 
-        connectedPort.writeBytes(
-                data,
-                data.length
-        );
+        try {
+            port.writeBytes(data, data.length);
+        } catch (RuntimeException ignored) {
+            // Uma falha de escrita não pode derrubar a thread do jogo.
+        }
     }
 
     public static String readMessage() {
@@ -79,21 +134,18 @@ public class SerialManager {
                         buffer.length
                 );
 
-        if (bytesRead <= 0) {
-            return null;
-        }
-
-        String received =
-                new String(
-                        buffer,
-                        0,
-                        bytesRead,
-                        StandardCharsets.UTF_8
-                );
-
         synchronized (receiveBuffer) {
 
-            receiveBuffer.append(received);
+            if (bytesRead > 0) {
+                receiveBuffer.append(
+                        new String(
+                                buffer,
+                                0,
+                                bytesRead,
+                                StandardCharsets.UTF_8
+                        )
+                );
+            }
 
             // Procura uma mensagem completa
             int newlineIndex =
